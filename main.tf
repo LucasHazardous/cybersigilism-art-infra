@@ -1,0 +1,246 @@
+provider "aws" {
+  region = var.project_region
+}
+
+provider "spaceship" {
+  api_key    = var.spaceship_api_key
+  api_secret = var.spaceship_api_secret
+}
+
+resource "spaceship_domain" "cybersigilism_art" {
+  domain = var.domain_name
+  nameservers = {
+    provider = "custom"
+    hosts    = aws_route53_zone.primary.name_servers
+  }
+}
+
+resource "aws_codecommit_repository" "primary" {
+  repository_name = var.codecommit_name
+  description     = "Repository for cybersigilism.art website"
+
+  tags = {
+    Project = var.project_tag
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_route53_zone" "primary" {
+  name = var.domain_name
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+resource "aws_s3_bucket" "website_bucket" {
+  bucket           = format("%s-%s-%s-an", var.website_bucket_name, data.aws_caller_identity.current.account_id, data.aws_region.current.region)
+  bucket_namespace = "account-regional"
+  force_destroy    = true
+
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "example" {
+  bucket = aws_s3_bucket.website_bucket.bucket
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+data "aws_iam_policy_document" "allow_public_bucket_access" {
+  statement {
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = [ "s3:GetObject" ]
+
+    resources = [ "${aws_s3_bucket.website_bucket.arn}/*" ]
+  }
+}
+
+resource "aws_s3_bucket_policy" "allow_public_bucket_access" {
+  bucket = aws_s3_bucket.website_bucket.id
+  policy = data.aws_iam_policy_document.allow_public_bucket_access.json
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
+resource "aws_s3_bucket_website_configuration" "primary" {
+  bucket = aws_s3_bucket.website_bucket.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "index.html"
+  }
+}
+
+data "aws_iam_policy_document" "codebuild_assume" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["codebuild.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "codebuild_role" {
+  name               = "${var.codebuild_name}-codebuild"
+  assume_role_policy = data.aws_iam_policy_document.codebuild_assume.json
+
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+data "aws_iam_policy_document" "codebuild" {
+  statement {
+    effect    = "Allow"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["codecommit:GitPull"]
+    resources = [aws_codecommit_repository.primary.arn]
+  }
+
+  statement {
+    effect  = "Allow"
+    actions = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"]
+    resources = [
+      aws_s3_bucket.website_bucket.arn,
+      "${aws_s3_bucket.website_bucket.arn}/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "codebuild" {
+  role   = aws_iam_role.codebuild_role.id
+  policy = data.aws_iam_policy_document.codebuild.json
+}
+
+resource "aws_codebuild_project" "primary" {
+  name          = var.codebuild_name
+  service_role  = aws_iam_role.codebuild_role.arn
+  build_timeout = 10
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  environment {
+    compute_type = "BUILD_GENERAL1_SMALL"
+    image        = "aws/codebuild/amazonlinux2-x86_64-standard:5.0"
+    type         = "LINUX_CONTAINER"
+
+    environment_variable {
+      name  = "BUCKET"
+      value = aws_s3_bucket.website_bucket.bucket
+    }
+  }
+
+  source {
+    type      = "CODECOMMIT"
+    location  = aws_codecommit_repository.primary.clone_url_http
+    buildspec = <<-EOT
+      version: 0.2
+      phases:
+        install:
+          runtime-versions:
+            nodejs: 22
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npm run build
+        post_build:
+          commands:
+            - aws s3 sync dist/ "s3://$BUCKET" --delete
+    EOT
+  }
+
+  source_version = "refs/heads/main"
+
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "main_push" {
+  name = "${var.codebuild_name}-main-push"
+
+  event_pattern = jsonencode({
+    source      = ["aws.codecommit"]
+    detail-type = ["CodeCommit Repository State Change"]
+    resources   = [aws_codecommit_repository.primary.arn]
+    detail = {
+      event         = ["referenceUpdated", "referenceCreated"]
+      referenceType = ["branch"]
+      referenceName = ["main"]
+    }
+  })
+
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+data "aws_iam_policy_document" "events_assume" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type = "Service"
+      identifiers = [ "events.amazonaws.com" ]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "events" {
+  name               = "${var.codebuild_name}-events"
+  assume_role_policy = data.aws_iam_policy_document.events_assume.json
+
+  tags = {
+    Project = var.project_tag
+  }
+}
+
+data "aws_iam_policy_document" "cloudwatch" {
+  statement {
+    effect = "Allow"
+    actions = [ "codebuild:StartBuild" ]
+    resources = [ aws_codebuild_project.primary.arn ]
+  }
+}
+
+resource "aws_iam_role_policy" "events" {
+  role = aws_iam_role.events.id
+  policy = data.aws_iam_policy_document.cloudwatch.json
+}
+
+resource "aws_cloudwatch_event_target" "start_build" {
+  rule     = aws_cloudwatch_event_rule.main_push.name
+  arn      = aws_codebuild_project.primary.arn
+  role_arn = aws_iam_role.events.arn
+}
