@@ -2,6 +2,11 @@ provider "aws" {
   region = var.project_region
 }
 
+provider "aws" {
+  alias  = "cloudfront_acm"
+  region = "us-east-1"
+}
+
 provider "spaceship" {
   api_key    = var.spaceship_api_key
   api_secret = var.spaceship_api_secret
@@ -16,7 +21,8 @@ resource "spaceship_domain" "cybersigilism_art" {
 }
 
 resource "aws_acm_certificate" "cert" {
-  domain_name = var.domain_name
+  provider          = aws.cloudfront_acm
+  domain_name       = var.domain_name
   validation_method = "DNS"
 
   tags = {
@@ -42,8 +48,9 @@ resource "aws_route53_record" "validation" {
 }
 
 resource "aws_acm_certificate_validation" "default" {
-  certificate_arn = aws_acm_certificate.cert.arn
-  validation_record_fqdns = [ for record in aws_route53_record.validation : record.fqdn ]
+  provider                = aws.cloudfront_acm
+  certificate_arn         = aws_acm_certificate.cert.arn
+  validation_record_fqdns = [for record in aws_route53_record.validation : record.fqdn]
 }
 
 resource "aws_codecommit_repository" "primary" {
@@ -64,6 +71,10 @@ resource "aws_route53_zone" "primary" {
   tags = {
     Project = var.project_tag
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket" "website_bucket" {
@@ -76,48 +87,33 @@ resource "aws_s3_bucket" "website_bucket" {
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "example" {
-  bucket = aws_s3_bucket.website_bucket.bucket
-
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-data "aws_iam_policy_document" "allow_public_bucket_access" {
+data "aws_iam_policy_document" "s3_cloudfront" {
   statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.website_bucket.arn}/*"]
+
     principals {
-      type        = "*"
-      identifiers = ["*"]
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
     }
 
-    actions = [ "s3:GetObject" ]
-
-    resources = [ "${aws_s3_bucket.website_bucket.arn}/*" ]
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.s3_distribution.arn]
+    }
   }
 }
 
-resource "aws_s3_bucket_policy" "allow_public_bucket_access" {
+resource "aws_s3_bucket_policy" "cloudfront" {
   bucket = aws_s3_bucket.website_bucket.id
-  policy = data.aws_iam_policy_document.allow_public_bucket_access.json
+  policy = data.aws_iam_policy_document.s3_cloudfront.json
 }
 
 data "aws_caller_identity" "current" {}
 
 data "aws_region" "current" {}
-
-resource "aws_s3_bucket_website_configuration" "primary" {
-  bucket = aws_s3_bucket.website_bucket.id
-
-  index_document {
-    suffix = "index.html"
-  }
-
-  error_document {
-    key = "index.html"
-  }
-}
 
 data "aws_iam_policy_document" "codebuild_assume" {
   statement {
@@ -240,8 +236,8 @@ data "aws_iam_policy_document" "events_assume" {
     effect = "Allow"
 
     principals {
-      type = "Service"
-      identifiers = [ "events.amazonaws.com" ]
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
     }
 
     actions = ["sts:AssumeRole"]
@@ -259,14 +255,14 @@ resource "aws_iam_role" "events" {
 
 data "aws_iam_policy_document" "cloudwatch" {
   statement {
-    effect = "Allow"
-    actions = [ "codebuild:StartBuild" ]
-    resources = [ aws_codebuild_project.primary.arn ]
+    effect    = "Allow"
+    actions   = ["codebuild:StartBuild"]
+    resources = [aws_codebuild_project.primary.arn]
   }
 }
 
 resource "aws_iam_role_policy" "events" {
-  role = aws_iam_role.events.id
+  role   = aws_iam_role.events.id
   policy = data.aws_iam_policy_document.cloudwatch.json
 }
 
@@ -274,4 +270,70 @@ resource "aws_cloudwatch_event_target" "start_build" {
   rule     = aws_cloudwatch_event_rule.main_push.name
   arn      = aws_codebuild_project.primary.arn
   role_arn = aws_iam_role.events.arn
+}
+
+resource "aws_route53_record" "alias" {
+  for_each = toset(["A", "AAAA"])
+
+  zone_id = aws_route53_zone.primary.zone_id
+  name    = var.domain_name
+  type    = each.value
+
+  alias {
+    name                   = aws_cloudfront_distribution.s3_distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.s3_distribution.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
+resource "aws_cloudfront_origin_access_control" "default" {
+  name                              = "default-oac"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_distribution" "s3_distribution" {
+  origin {
+    domain_name              = aws_s3_bucket.website_bucket.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.default.id
+    origin_id                = aws_s3_bucket.website_bucket.id
+  }
+
+  aliases = [var.domain_name]
+
+  enabled         = true
+  is_ipv6_enabled = true
+
+  default_root_object = "index.html"
+
+  default_cache_behavior {
+    allowed_methods = ["GET", "HEAD"]
+    cached_methods  = ["GET", "HEAD"]
+
+    target_origin_id = aws_s3_bucket.website_bucket.id
+
+    viewer_protocol_policy = "redirect-to-https"
+    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+  }
+
+  restrictions {
+    geo_restriction {
+      locations        = ["PL", "FR"]
+      restriction_type = "whitelist"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn = aws_acm_certificate.cert.arn
+    ssl_support_method  = "sni-only"
+  }
+
+  tags = {
+    Project = var.project_tag
+  }
 }
