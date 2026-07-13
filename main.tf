@@ -35,15 +35,6 @@ resource "aws_acm_certificate_validation" "default" {
   validation_record_fqdns = [for record in aws_route53_record.validation : record.fqdn]
 }
 
-resource "aws_codecommit_repository" "primary" {
-  repository_name = var.codecommit_name
-  description     = "Repository for cybersigilism.art website"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
 resource "aws_route53_zone" "primary" {
   name = var.domain_name
 
@@ -113,8 +104,8 @@ data "aws_iam_policy_document" "codebuild" {
 
   statement {
     effect    = "Allow"
-    actions   = ["codecommit:GitPull"]
-    resources = [aws_codecommit_repository.primary.arn]
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.github_token.arn]
   }
 
   statement {
@@ -153,8 +144,12 @@ resource "aws_codebuild_project" "primary" {
   }
 
   source {
-    type      = "CODECOMMIT"
-    location  = aws_codecommit_repository.primary.clone_url_http
+    type     = "GITHUB"
+    location = var.github_repository_url
+    auth {
+      type     = "SECRETS_MANAGER"
+      resource = aws_secretsmanager_secret.github_token.arn
+    }
     buildspec = <<-EOT
       version: 0.2
       phases:
@@ -172,59 +167,37 @@ resource "aws_codebuild_project" "primary" {
     EOT
   }
 
-  source_version = "refs/heads/main"
+  source_version = "main"
 }
 
-resource "aws_cloudwatch_event_rule" "main_push" {
-  name = "${var.codebuild_name}-main-push"
+resource "github_repository" "cybersigilism_art" {
+  name       = "cybersigilism-art"
+  visibility = "private"
+}
 
-  event_pattern = jsonencode({
-    source      = ["aws.codecommit"]
-    detail-type = ["CodeCommit Repository State Change"]
-    resources   = [aws_codecommit_repository.primary.arn]
-    detail = {
-      event         = ["referenceUpdated", "referenceCreated"]
-      referenceType = ["branch"]
-      referenceName = ["main"]
+resource "aws_codebuild_webhook" "cybersigilim_art_main" {
+  project_name = aws_codebuild_project.primary.name
+  build_type   = "BUILD"
+
+  filter_group {
+    filter {
+      type    = "EVENT"
+      pattern = "PUSH"
     }
+  }
+}
+
+resource "aws_secretsmanager_secret" "github_token" {
+  name = "cybersigilism-art-github-token"
+}
+
+resource "aws_secretsmanager_secret_version" "github_token" {
+  secret_id = aws_secretsmanager_secret.github_token.id
+  secret_string = jsonencode({
+    ServerType = "GITHUB"
+    AuthType   = "PERSONAL_ACCESS_TOKEN"
+    Token      = var.github_token
   })
-}
-
-data "aws_iam_policy_document" "events_assume" {
-  statement {
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["events.amazonaws.com"]
-    }
-
-    actions = ["sts:AssumeRole"]
-  }
-}
-
-resource "aws_iam_role" "events" {
-  name               = "${var.codebuild_name}-events"
-  assume_role_policy = data.aws_iam_policy_document.events_assume.json
-}
-
-data "aws_iam_policy_document" "cloudwatch" {
-  statement {
-    effect    = "Allow"
-    actions   = ["codebuild:StartBuild"]
-    resources = [aws_codebuild_project.primary.arn]
-  }
-}
-
-resource "aws_iam_role_policy" "events" {
-  role   = aws_iam_role.events.id
-  policy = data.aws_iam_policy_document.cloudwatch.json
-}
-
-resource "aws_cloudwatch_event_target" "start_build" {
-  rule     = aws_cloudwatch_event_rule.main_push.name
-  arn      = aws_codebuild_project.primary.arn
-  role_arn = aws_iam_role.events.arn
 }
 
 resource "aws_route53_record" "alias" {

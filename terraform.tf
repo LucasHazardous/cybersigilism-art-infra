@@ -9,6 +9,11 @@ terraform {
       source  = "namecheap/spaceship"
       version = ">= 0.4.0"
     }
+
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 
   backend "s3" {

@@ -23,3 +23,7 @@ provider "spaceship" {
   api_key    = var.spaceship_api_key
   api_secret = var.spaceship_api_secret
 }
+
+provider "github" {
+  token = var.github_token
+}
