@@ -1,17 +1,3 @@
-provider "aws" {
-  region = var.project_region
-}
-
-provider "aws" {
-  alias  = "cloudfront_acm"
-  region = "us-east-1"
-}
-
-provider "spaceship" {
-  api_key    = var.spaceship_api_key
-  api_secret = var.spaceship_api_secret
-}
-
 resource "spaceship_domain" "cybersigilism_art" {
   domain = var.domain_name
   nameservers = {
@@ -24,10 +10,6 @@ resource "aws_acm_certificate" "cert" {
   provider          = aws.cloudfront_acm
   domain_name       = var.domain_name
   validation_method = "DNS"
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 resource "aws_route53_record" "validation" {
@@ -57,10 +39,6 @@ resource "aws_codecommit_repository" "primary" {
   repository_name = var.codecommit_name
   description     = "Repository for cybersigilism.art website"
 
-  tags = {
-    Project = var.project_tag
-  }
-
   lifecycle {
     prevent_destroy = true
   }
@@ -68,9 +46,6 @@ resource "aws_codecommit_repository" "primary" {
 
 resource "aws_route53_zone" "primary" {
   name = var.domain_name
-  tags = {
-    Project = var.project_tag
-  }
 
   lifecycle {
     prevent_destroy = true
@@ -81,10 +56,6 @@ resource "aws_s3_bucket" "website_bucket" {
   bucket           = format("%s-%s-%s-an", var.website_bucket_name, data.aws_caller_identity.current.account_id, data.aws_region.current.region)
   bucket_namespace = "account-regional"
   force_destroy    = true
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 data "aws_iam_policy_document" "s3_cloudfront" {
@@ -131,10 +102,6 @@ data "aws_iam_policy_document" "codebuild_assume" {
 resource "aws_iam_role" "codebuild_role" {
   name               = "${var.codebuild_name}-codebuild"
   assume_role_policy = data.aws_iam_policy_document.codebuild_assume.json
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 data "aws_iam_policy_document" "codebuild" {
@@ -206,10 +173,6 @@ resource "aws_codebuild_project" "primary" {
   }
 
   source_version = "refs/heads/main"
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 resource "aws_cloudwatch_event_rule" "main_push" {
@@ -225,10 +188,6 @@ resource "aws_cloudwatch_event_rule" "main_push" {
       referenceName = ["main"]
     }
   })
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 data "aws_iam_policy_document" "events_assume" {
@@ -247,10 +206,6 @@ data "aws_iam_policy_document" "events_assume" {
 resource "aws_iam_role" "events" {
   name               = "${var.codebuild_name}-events"
   assume_role_policy = data.aws_iam_policy_document.events_assume.json
-
-  tags = {
-    Project = var.project_tag
-  }
 }
 
 data "aws_iam_policy_document" "cloudwatch" {
@@ -331,9 +286,5 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
   viewer_certificate {
     acm_certificate_arn = aws_acm_certificate.cert.arn
     ssl_support_method  = "sni-only"
-  }
-
-  tags = {
-    Project = var.project_tag
   }
 }
