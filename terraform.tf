@@ -12,10 +12,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "cybersigilism-art-state"
-    key = "state/terraform.tfstate"
-    region = "us-east-1"
-    encrypt = true
+    bucket       = "cybersigilism-art-state"
+    key          = "state/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
     use_lockfile = true
   }
 
