@@ -18,6 +18,12 @@ resource "aws_codebuild_project" "primary" {
     }
   }
 
+  logs_config {
+    cloudwatch_logs {
+      group_name = aws_cloudwatch_log_group.website_codebuild.name
+    }
+  }
+
   source {
     type     = "GITHUB"
     location = var.github_repository_url
@@ -60,7 +66,7 @@ resource "aws_codebuild_webhook" "cybersigilim_art_main" {
 data "aws_iam_policy_document" "codebuild" {
   statement {
     effect    = "Allow"
-    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["arn:aws:logs:*:*:*"]
   }
 
@@ -120,4 +126,9 @@ resource "aws_secretsmanager_secret_version" "github_token" {
 resource "github_repository" "cybersigilism_art" {
   name       = "cybersigilism-art"
   visibility = "private"
+}
+
+resource "aws_cloudwatch_log_group" "website_codebuild" {
+  name = local.codebuild_cloudwatch_group_name
+  retention_in_days = 7
 }

@@ -8,4 +8,5 @@ locals {
   domain_name = "cybersigilism.art"
   website_bucket_name = "cybersigilism-art-website"
   codebuild_name = "cybersigilism-art-website"
+  codebuild_cloudwatch_group_name = "cybersigilism-art-website"
 }
