@@ -109,11 +109,12 @@ resource "aws_secretsmanager_secret" "github_token" {
 
 resource "aws_secretsmanager_secret_version" "github_token" {
   secret_id = aws_secretsmanager_secret.github_token.id
-  secret_string = jsonencode({
+  secret_string_wo = jsonencode({
     ServerType = "GITHUB"
     AuthType   = "PERSONAL_ACCESS_TOKEN"
     Token      = var.github_token
   })
+  secret_string_wo_version = 1
 }
 
 resource "github_repository" "cybersigilism_art" {
