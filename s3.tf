@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "website_bucket" {
-  bucket           = format("%s-%s-%s-an", var.website_bucket_name, data.aws_caller_identity.current.account_id, data.aws_region.current.region)
+  bucket           = format("%s-%s-%s-an", local.website_bucket_name, data.aws_caller_identity.current.account_id, data.aws_region.current.region)
   bucket_namespace = "account-regional"
   force_destroy    = true
 }

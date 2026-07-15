@@ -1,5 +1,5 @@
 resource "spaceship_domain" "cybersigilism_art" {
-  domain = var.domain_name
+  domain = local.domain_name
   nameservers = {
     provider = "custom"
     hosts    = aws_route53_zone.primary.name_servers
@@ -7,7 +7,7 @@ resource "spaceship_domain" "cybersigilism_art" {
 }
 
 resource "aws_route53_zone" "primary" {
-  name = var.domain_name
+  name = local.domain_name
 
   lifecycle {
     prevent_destroy = true
@@ -35,7 +35,7 @@ resource "aws_route53_record" "alias" {
   for_each = toset(["A", "AAAA"])
 
   zone_id = aws_route53_zone.primary.zone_id
-  name    = var.domain_name
+  name    = local.domain_name
   type    = each.value
 
   alias {
@@ -47,7 +47,7 @@ resource "aws_route53_record" "alias" {
 
 resource "aws_acm_certificate" "cert" {
   provider          = aws.cloudfront_acm
-  domain_name       = var.domain_name
+  domain_name       = local.domain_name
   validation_method = "DNS"
 }
 

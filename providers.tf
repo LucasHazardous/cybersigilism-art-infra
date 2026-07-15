@@ -1,9 +1,9 @@
 provider "aws" {
-  region = var.project_region
+  region = local.project_region
 
   default_tags {
     tags = {
-      Project = var.project_tag
+      Project = local.project_tag
     }
   }
 }
@@ -14,7 +14,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project = var.project_tag
+      Project = local.project_tag
     }
   }
 }

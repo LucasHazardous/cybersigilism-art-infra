@@ -1,5 +1,5 @@
 resource "aws_codebuild_project" "primary" {
-  name          = var.codebuild_name
+  name          = local.codebuild_name
   service_role  = aws_iam_role.codebuild_role.arn
   build_timeout = 10
 
@@ -94,7 +94,7 @@ data "aws_iam_policy_document" "codebuild_assume" {
 }
 
 resource "aws_iam_role" "codebuild_role" {
-  name               = "${var.codebuild_name}-codebuild"
+  name               = "${local.codebuild_name}-codebuild"
   assume_role_policy = data.aws_iam_policy_document.codebuild_assume.json
 }
 
