@@ -7,12 +7,17 @@ terraform {
 
     spaceship = {
       source  = "namecheap/spaceship"
-      version = ">= 0.4.0"
+      version = "~> 0.4"
     }
 
     github = {
       source  = "integrations/github"
       version = "~> 6.0"
+    }
+
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.8"
     }
   }
 

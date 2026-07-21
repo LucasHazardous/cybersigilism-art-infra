@@ -27,3 +27,6 @@ provider "spaceship" {
 provider "github" {
   token = var.github_token
 }
+
+provider "archive" {}
+
