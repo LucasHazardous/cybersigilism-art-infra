@@ -23,7 +23,7 @@ resource "aws_budgets_budget" "max_spending" {
 
   cost_filter {
     name   = "TagKeyValue"
-    values = ["Project:$${local.project_tag}"]
+    values = ["user:Project${"$"}${local.project_tag}"]
   }
 }
 
@@ -99,3 +99,7 @@ resource "aws_lambda_permission" "allow_sns" {
   source_arn    = aws_sns_topic.budget_killswitch.arn
 }
 
+resource "aws_ce_cost_allocation_tag" "project" {
+  tag_key = "Project"
+  status  = "Active"
+}
