@@ -63,6 +63,15 @@ data "aws_iam_policy_document" "budget_lambda_cloudfront" {
     ]
     resources = [aws_cloudfront_distribution.s3_distribution.arn]
   }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [aws_cloudwatch_log_group.budget_lambda.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "allow_cloudfront_in_lambda" {
@@ -80,7 +89,7 @@ resource "aws_lambda_function" "budget_killswitch" {
   code_sha256   = data.archive_file.budget_lambda.output_sha256
   handler       = "budget_killswitch_lambda.lambda_handler"
   timeout       = 30
-  function_name = "budget-killswitch"
+  function_name = local.budget_lambda_name
   role          = aws_iam_role.budget_lambda_execution.arn
   runtime       = "python3.14"
 
@@ -89,6 +98,8 @@ resource "aws_lambda_function" "budget_killswitch" {
       CLOUDFRONT_DISTRIBUTION_ID = aws_cloudfront_distribution.s3_distribution.id
     }
   }
+
+  depends_on = [ aws_cloudwatch_log_group.budget_lambda ]
 }
 
 resource "aws_lambda_permission" "allow_sns" {
@@ -102,4 +113,9 @@ resource "aws_lambda_permission" "allow_sns" {
 resource "aws_ce_cost_allocation_tag" "project" {
   tag_key = "Project"
   status  = "Active"
+}
+
+resource "aws_cloudwatch_log_group" "budget_lambda" {
+  name = "/aws/lambda/${local.budget_lambda_name}"
+  retention_in_days = 7
 }
